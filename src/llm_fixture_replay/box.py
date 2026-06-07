@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import hashlib
+import inspect
 import json
 import os
 import threading
@@ -47,9 +47,7 @@ class FixtureMissError(LookupError):
         self.hash = hash_
         self.args_repr = args_repr
         excerpt = args_repr if len(args_repr) <= 120 else args_repr[:117] + "..."
-        super().__init__(
-            f"no fixture matches hash {hash_[:12]}... for call {excerpt}"
-        )
+        super().__init__(f"no fixture matches hash {hash_[:12]}... for call {excerpt}")
 
 
 # A hasher receives the wrapped function's args and kwargs and returns a
@@ -147,20 +145,24 @@ class FixtureBox:
 
         return wrapper
 
-    def wrap_async(
-        self, fn: Callable[..., Awaitable[Any]]
-    ) -> Callable[..., Awaitable[Any]]:
+    def wrap_async(self, fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
         """Return an async wrapper around an async ``fn`` honoring this
-        box's mode. Mirrors :meth:`wrap` for coroutine functions."""
+        box's mode. Mirrors :meth:`wrap` for coroutine functions.
 
-        if not asyncio.iscoroutinefunction(fn):
-            # still allow wrapping; we just await the return value
-            pass
+        ``fn`` is normally a coroutine function, but a plain callable that
+        returns an awaitable is also accepted; its return value is awaited
+        only when it is actually awaitable."""
+
+        async def _call(*args: Any, **kwargs: Any) -> Any:
+            result = fn(*args, **kwargs)
+            if inspect.isawaitable(result):
+                return await result
+            return result
 
         @wraps(fn)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
             if self._mode is Mode.DISABLED:
-                return await fn(*args, **kwargs)
+                return await _call(*args, **kwargs)
 
             key = self._hasher(*args, **kwargs)
             args_repr = repr(args)
@@ -181,7 +183,7 @@ class FixtureBox:
                     return hit
                 self._misses += 1
 
-            result = await fn(*args, **kwargs)
+            result = await _call(*args, **kwargs)
             self._record(key, args_repr, kwargs_repr, result)
             return result
 

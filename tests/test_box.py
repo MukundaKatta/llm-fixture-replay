@@ -141,6 +141,7 @@ def test_custom_hasher_used_for_matching(tmp_path):
 
     def hash_prompt_only(*args, **kw):
         import hashlib
+
         return hashlib.sha256(kw["prompt"].encode()).hexdigest()
 
     box = FixtureBox(
@@ -348,6 +349,25 @@ async def test_async_replay_miss_raises(tmp_path):
     wrapped = box.wrap_async(real)
     with pytest.raises(FixtureMissError):
         await wrapped("missing")
+
+
+async def test_async_wrap_accepts_plain_callable(tmp_path):
+    """wrap_async also accepts a sync callable that returns a value."""
+    path = tmp_path / "fix.jsonl"
+    calls = {"n": 0}
+
+    def real(prompt):
+        calls["n"] += 1
+        return f"sync:{prompt}"
+
+    box = FixtureBox(path=str(path), mode=Mode.AUTO)
+    wrapped = box.wrap_async(real)
+
+    assert await wrapped("hi") == "sync:hi"
+    assert calls["n"] == 1
+    # second call replays without invoking real again
+    assert await wrapped("hi") == "sync:hi"
+    assert calls["n"] == 1
 
 
 async def test_async_disabled_passthrough(tmp_path):
